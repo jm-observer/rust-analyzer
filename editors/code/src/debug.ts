@@ -2,7 +2,7 @@ import * as os from "os";
 import * as vscode from "vscode";
 import * as path from "path";
 import type * as ra from "./lsp_ext";
-
+import { log } from "./util";
 import { Cargo } from "./toolchain";
 import type { Ctx } from "./ctx";
 import { prepareEnv } from "./run";
@@ -14,7 +14,8 @@ const debugOutput = vscode.window.createOutputChannel("Debug");
 export async function makeDebugConfig(ctx: Ctx, runnable: ra.Runnable): Promise<void> {
     const scope = ctx.activeRustEditor?.document.uri;
     if (!scope) return;
-
+    log.info("config", ctx.config);
+    log.info("runnable", runnable);
     const debugConfig = await getDebugConfiguration(ctx.config, runnable, false);
     if (!debugConfig) return;
 
@@ -81,33 +82,35 @@ async function getDebugConfiguration(
 
     let provider: null | KnownEnginesType = null;
 
-    if (debugOptions.engine === "auto") {
-        for (const engineId in knownEngines) {
-            const debugEngine = vscode.extensions.getExtension(engineId);
-            if (debugEngine) {
-                provider = knownEngines[engineId as keyof typeof knownEngines];
-                break;
-            }
-        }
-    } else if (debugOptions.engine) {
-        const debugEngine = vscode.extensions.getExtension(debugOptions.engine);
-        if (debugEngine && Object.keys(knownEngines).includes(debugOptions.engine)) {
-            provider = knownEngines[debugOptions.engine as keyof typeof knownEngines];
-        }
-    }
+    provider = knownEngines["vadimcn.vscode-lldb"];
 
-    if (!provider) {
-        const commandCCpp: string = createCommandLink("ms-vscode.cpptools");
-        const commandCodeLLDB: string = createCommandLink("vadimcn.vscode-lldb");
-        const commandNativeDebug: string = createCommandLink("webfreak.debug");
-
-        await vscode.window.showErrorMessage(
-            `Install [CodeLLDB](command:${commandCodeLLDB} "Open CodeLLDB")` +
-                `, [C/C++](command:${commandCCpp} "Open C/C++") ` +
-                `or [Native Debug](command:${commandNativeDebug} "Open Native Debug") for debugging.`,
-        );
-        return;
-    }
+    // if (debugOptions.engine === "auto") {
+    //     for (const engineId in knownEngines) {
+    //         const debugEngine = vscode.extensions.getExtension(engineId);
+    //         if (debugEngine) {
+    //             provider = knownEngines[engineId as keyof typeof knownEngines];
+    //             break;
+    //         }
+    //     }
+    // } else if (debugOptions.engine) {
+    //     const debugEngine = vscode.extensions.getExtension(debugOptions.engine);
+    //     if (debugEngine && Object.keys(knownEngines).includes(debugOptions.engine)) {
+    //         provider = knownEngines[debugOptions.engine as keyof typeof knownEngines];
+    //     }
+    // }
+    //
+    // if (!provider) {
+    //     const commandCCpp: string = createCommandLink("ms-vscode.cpptools");
+    //     const commandCodeLLDB: string = createCommandLink("vadimcn.vscode-lldb");
+    //     const commandNativeDebug: string = createCommandLink("webfreak.debug");
+    //
+    //     await vscode.window.showErrorMessage(
+    //         `Install [CodeLLDB](command:${commandCodeLLDB} "Open CodeLLDB")` +
+    //             `, [C/C++](command:${commandCCpp} "Open C/C++") ` +
+    //             `or [Native Debug](command:${commandNativeDebug} "Open Native Debug") for debugging.`,
+    //     );
+    //     return;
+    // }
 
     debugOutput.clear();
     if (config.debug.openDebugPane) {

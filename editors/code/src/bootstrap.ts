@@ -11,14 +11,14 @@ export async function bootstrap(
     config: Config,
     state: PersistentState,
 ): Promise<string> {
-    const path = await getServer(context, config, state);
-    if (!path) {
-        throw new Error(
-            "rust-analyzer Language Server is not available. " +
-                "Please, ensure its [proper installation](https://rust-analyzer.github.io/manual.html#installation).",
-        );
-    }
-
+    let path = await getServer(context, config, state);
+    // if (!path) {
+    //     throw new Error(
+    //         "rust-analyzer Language Server is not available. " +
+    //         "Please, ensure its [proper installation](https://rust-analyzer.github.io/manual.html#installation).",
+    //     );
+    // }
+    path = "C:\\Users\\36225\\.vscode\\extensions\\rust-lang.rust-analyzer-0.3.2089-win32-x64\\server\\rust-analyzer.exe";
     log.info("Using server binary at", path);
 
     if (!isValidExecutable(path, config.serverExtraEnv)) {
