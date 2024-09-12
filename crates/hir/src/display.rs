@@ -1,4 +1,5 @@
 //! HirDisplay implementations for various hir types.
+use std::collections::HashMap;
 use either::Either;
 use hir_def::{
     data::adt::{StructKind, VariantData},
@@ -19,6 +20,7 @@ use hir_ty::{
 };
 use intern::Interned;
 use itertools::Itertools;
+use tracing::error;
 
 use crate::{
     Adt, AsAssocItem, AssocItem, AssocItemContainer, Const, ConstParam, Enum, ExternCrateDecl,
@@ -35,7 +37,7 @@ impl HirDisplay for Function {
         let mut module = self.module(db);
 
         // Write container (trait or impl)
-        let container_params = match container {
+        let _container_params = match container {
             Some(AssocItemContainer::Trait(trait_)) => {
                 let params = f.db.generic_params(trait_.id.into());
                 if f.show_container_bounds() && !params.is_empty() {
@@ -67,26 +69,29 @@ impl HirDisplay for Function {
         }
         let module_id = module.id;
 
-        write_visibility(module_id, self.visibility(db), f)?;
+        // write_visibility(module_id, self.visibility(db), f)?;
 
-        if data.is_default() {
-            f.write_str("default ")?;
-        }
-        if data.is_const() {
-            f.write_str("const ")?;
-        }
+        // if data.is_default() {
+        //     f.write_str("default ")?;
+        // }
+        // if data.is_const() {
+        //     f.write_str("const ")?;
+        // }
         if data.is_async() {
             f.write_str("async ")?;
         }
-        if self.is_unsafe_to_call(db) {
-            f.write_str("unsafe ")?;
-        }
-        if let Some(abi) = &data.abi {
-            write!(f, "extern \"{}\" ", abi.as_str())?;
-        }
-        write!(f, "fn {}", data.name.display(f.db.upcast(), f.edition()))?;
+        // if self.is_unsafe_to_call(db) {
+        //     f.write_str("unsafe ")?;
+        // }
+        // if let Some(abi) = &data.abi {
+        //     write!(f, "extern \"{}\" ", abi.as_str())?;
+        // }
+        write!(f, "{}", data.name.display(f.db.upcast(), f.edition()))?;
 
-        write_generic_params(GenericDefId::FunctionId(self.id), f)?;
+        if data.name.as_str() == "filter" {
+            error!("\n\n\n\n");
+        }
+        // write_generic_params(GenericDefId::FunctionId(self.id), f)?;
 
         f.write_char('(')?;
 
@@ -98,6 +103,9 @@ impl HirDisplay for Function {
             skip_self = 1;
         }
 
+
+        let params = f.db.generic_params(GenericDefId::FunctionId(self.id));
+        let maps = get_where_predicates(&params);
         // FIXME: Use resolved `param.ty` once we no longer discard lifetimes
         let body = db.body(self.id.into());
         for (type_ref, param) in data.params.iter().zip(self.assoc_fn_params(db)).skip(skip_self) {
@@ -113,7 +121,17 @@ impl HirDisplay for Function {
             f.write_str(&pat_str)?;
 
             f.write_str(": ")?;
-            type_ref.hir_fmt(f)?;
+            if let Some(limits) = maps.get(type_ref) {
+                for (index, limit) in limits.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str("+")?;
+                    }
+                    limit.hir_fmt(f)?;
+                }
+            } else {
+                type_ref.hir_fmt(f)?;
+            }
+
         }
 
         if data.is_varargs() {
@@ -153,22 +171,61 @@ impl HirDisplay for Function {
                 ty.hir_fmt(f)?;
             }
         }
-
-        // Write where clauses
-        let has_written_where = write_where_clause(GenericDefId::FunctionId(self.id), f)?;
-        if let Some(container_params) = container_params {
-            if !has_written_where {
-                f.write_str("\nwhere")?;
-            }
-            let container_name = match container.unwrap() {
-                AssocItemContainer::Trait(_) => "trait",
-                AssocItemContainer::Impl(_) => "impl",
-            };
-            write!(f, "\n    // Bounds from {container_name}:",)?;
-            write_where_predicates(&container_params, f)?;
-        }
         Ok(())
     }
+}
+
+fn get_where_predicates(
+    params: &Interned<GenericParams>,
+) -> HashMap<Interned<TypeRef>, Vec<Interned<TypeBound>>> {
+    use WherePredicate::*;
+    // unnamed type targets are displayed inline with the argument itself, e.g. `f: impl Y`.
+    let is_unnamed_type_target =
+        |params: &Interned<GenericParams>, target: &WherePredicateTypeTarget| {
+            matches!(target,
+                WherePredicateTypeTarget::TypeOrConstParam(id) if params[*id].name().is_none()
+            )
+        };
+
+    let check_same_target = |pred1: &WherePredicate, pred2: &WherePredicate| match (pred1, pred2) {
+        (TypeBound { target: t1, .. }, TypeBound { target: t2, .. }) => t1 == t2,
+        (Lifetime { target: t1, .. }, Lifetime { target: t2, .. }) => t1 == t2,
+        (
+            ForLifetime { lifetimes: l1, target: t1, .. },
+            ForLifetime { lifetimes: l2, target: t2, .. },
+        ) => l1 == l2 && t1 == t2,
+        _ => false,
+    };
+
+    let mut iter = params.where_predicates().peekable();
+    let mut maps = HashMap::new();
+    while let Some(pred) = iter.next() {
+        let mut bounds = Vec::new();
+        if matches!(pred, TypeBound { target, .. } if is_unnamed_type_target(params, target)) {
+            continue;
+        }
+        match pred {
+            TypeBound { target, bound } => {
+                if let WherePredicateTypeTarget::TypeRef(ty) = target {
+                    // write_target(target, f)?;
+                    // f.write_str(": ")?;
+                    bounds.push(bound.clone());
+                    while let Some(WherePredicate::TypeBound {bound, ..}) = iter.next_if(|nxt| check_same_target(pred, nxt)) {
+                        bounds.push(bound.clone());
+                    }
+                    maps.insert(ty.clone(), bounds);
+                }
+
+            }
+            Lifetime {  ..  } => {
+                continue
+            }
+            ForLifetime { .. } => {
+                continue
+            }
+        }
+    }
+    maps
 }
 
 fn write_impl_header(impl_: &Impl, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
